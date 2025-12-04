@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evan's Stick Fight Arena</title>
+    <style>
+        /* * CSS STYLES
+         * This controls how the game looks (colors, fonts, positioning).
+         */
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a; /* Dark background */
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden; /* Stop scrolling */
+        }
+
+        h1 {
+            margin: 10px 0 5px 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #ffcc00; /* Gold color */
+        }
+
+        h3 {
+            margin: 0 0 20px 0;
+            font-weight: normal;
+            font-size: 14px;
+            color: #cccccc;
+        }
+
+        /* The Game Container */
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 500px;
+            background-color: white; /* Bright arena */
+            border: 4px solid #444;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        /* The Canvas where the drawing happens */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* UI Overlays (Start Screen, Game Over) */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        /* Hide overlays when not needed */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Selection Screen Styles */
+        .select-container {
+            display: flex;
+            gap: 50px;
+            margin-bottom: 30px;
+        }
+
+        .player-select {
+            text-align: center;
+        }
+
+        .emoji-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .emoji-option {
+            font-size: 30px;
+            cursor: pointer;
+            padding: 5px;
+            border: 2px solid transparent;
+            border-radius: 5px;
+            transition: transform 0.1s;
+        }
+
+        .emoji-option:hover {
+            transform: scale(1.2);
+            background-color: #333;
+        }
+
+        .emoji-option.selected {
+            border-color: #ffcc00;
+            background-color: #444;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 20px;
+            background-color: #ffcc00;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            color: #000;
+            border-radius: 5px;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: #ffdb4d;
+        }
+
+        /* Game Over Text */
+        #winner-text {
+            font-size: 48px;
+            color: #ffcc00;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px #000;
+        }
+
+        /* Instructions underneath */
+        .instructions {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #888;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Evan's Stick Fight Arena</h1>
+    <h3>Created by Evan DeGraff</h3>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+        <div id="start-screen" class="overlay">
+            <h2 style="color:white; font-size: 32px;">CHOOSE YOUR FIGHTER</h2>
+            
+            <div class="select-container">
+                <div class="player-select">
+                    <div style="color: #4caf50; font-weight:bold; margin-bottom:5px;">PLAYER 1</div>
+                    <div>Controls: WASD + F</div>
+                    <div class="emoji-grid" id="p1-grid">
+                        </div>
+                </div>
+
+                <div class="player-select">
+                    <div style="color: #2196f3; font-weight:bold; margin-bottom:5px;">PLAYER 2</div>
+                    <div>Controls: Arrows + L</div>
+                    <div class="emoji-grid" id="p2-grid">
+                        </div>
+                </div>
+            </div>
+
+            <button id="start-btn" disabled>START MATCH</button>
+        </div>
+
+        <div id="game-over-screen" class="overlay hidden">
+            <div id="winner-text">Player 1 Wins!</div>
+            <button id="restart-btn">PLAY AGAIN</button>
+        </div>
+    </div>
+
+    <div class="instructions">
+        P1: A/D to move, W to jump, F to Punch <br>
+        P2: Left/Right to move, Up to jump, L to Punch
+    </div>
+
+    <script>
+        /*
+         * JAVASCRIPT GAME LOGIC
+         * This controls how the game works, moves, and thinks.
+         */
+
+        // --- 1. SETUP & VARIABLES ---
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game State variables
+        let gameState = 'SELECT'; // options: 'SELECT', 'PLAYING', 'GAMEOVER'
+        let p1Head = '';
+        let p2Head = '';
+        let particles = []; // For "POW" effects
+
+        // Physics Constants (Floaty/Wacky settings)
+        const GRAVITY = 0.5;
+        const JUMP_FORCE = -14; // High jump
+        const MOVE_SPEED = 6;
+        const FRICTION = 0.85; // Sliding feel
+        const FLOOR_Y = 450; // Where the ground is
+        const ATTACK_COOLDOWN = 30; // Frames between punches
+        const KNOCKBACK_X = 10;
+        const KNOCKBACK_Y = -5;
+
+        // Input Tracking
+        const keys = {};
+
+        // Define the emojis available
+        const emojis = ['😀', '😎', '🤖', '🤪', '😡', '🤩', '👽', '🤠', '💀'];
+
+        // --- 2. THE PLAYER CLASS ---
+        // This defines what a player is and what they can do
+        class Player {
+            constructor(x, color, controls) {
+                // Starting Position
+                this.startX = x;
+                this.x = x;
+                this.y = FLOOR_Y;
+                
+                // Movement
+                this.vx = 0;
+                this.vy = 0;
+                this.width = 40;
+                this.height = 90;
+                this.facing = 1; // 1 = right, -1 = left
+                
+                // Stats
+                this.color = color; // Stick body color (black usually)
+                this.hp = 100;
+                this.displayHp = 100; // For the red damage effect
+                this.lastHitTime = 0; // When were we last hit?
+                
+                // Combat
+                this.controls = controls;
+                this.cooldown = 0;
+                this.headEmoji = '😀'; // Default
+                this.isHitFrame = 0; // Flash white when hit
+            }
+
+            reset() {
+                this.x = this.startX;
+                this.y = FLOOR_Y;
+                this.vx = 0;
+                this.vy = 0;
+                this.hp = 100;
+                this.displayHp = 100;
+                this.cooldown = 0;
+                this.facing = (this.startX < 400) ? 1 : -1;
+            }
+
+            update(opponent) {
+                // 1. Movement Logic
+                if (keys[this.controls.left]) {
+                    this.vx -= 1; // Accelerate left
+                    this.facing = -1;
+                }
+                if (keys[this.controls.right]) {
+                    this.vx += 1; // Accelerate right
+                    this.facing = 1;
+                }
+                
+                // Cap speed
+                if (this.vx > MOVE_SPEED) this.vx = MOVE_SPEED;
+                if (this.vx < -MOVE_SPEED) this.vx = -MOVE_SPEED;
+
+                // Friction (slow down if not pressing keys)
+                if (!keys[this.controls.left] && !keys[this.controls.right]) {
+                    this.vx *= FRICTION;
+                }
+
+                // Jump
+                if (keys[this.controls.up] && this.onGround()) {
+                    this.vy = JUMP_FORCE;
+                }
+                // Optional: Crouch/Fast fall
+                if (keys[this.controls.down] && !this.onGround()) {
+                    this.vy += 1; // Fall faster
+                }
+
+                // Apply Gravity
+                this.vy += GRAVITY;
+
+                // Apply Velocity to Position
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Floor Collision
+                if (this.y > FLOOR_Y) {
+                    this.y = FLOOR_Y;
+                    this.vy = 0;
+                }
+
+                // Wall Collision (Keep inside arena)
+                if (this.x < 20) this.x = 20;
+                if (this.x > canvas.width - 20) this.x = canvas.width - 20;
+
+                // 2. Combat Logic
+                if (this.cooldown > 0) this.cooldown--;
+
+                if (keys[this.controls.attack] && this.cooldown <= 0) {
+                    this.attack(opponent);
+                }
+
+                // 3. Health Bar Visual Logic
+                // If we took damage recently, wait 200ms (roughly 12 frames), then shrink the red bar
+                if (this.displayHp > this.hp) {
+                    if (Date.now() - this.lastHitTime > 200) {
+                        this.displayHp -= 1; // Slowly shrink red bar
+                    }
+                }
+                
+                // Reduce hit flash timer
+                if (this.isHitFrame > 0) this.isHitFrame--;
+            }
+
+            onGround() {
+                return this.y >= FLOOR_Y;
+            }
+
+            attack(opponent) {
+                this.cooldown = ATTACK_COOLDOWN; // Reset cooldown
+                
+                // Calculate hitbox (box in front of player)
+                const reach = 60;
+                const hitX = this.x + (this.facing * 30); // Start slightly in front
+                const hitY = this.y - 60; // Chest height
+
+                // Check distance to opponent
+                const dx = Math.abs(this.x - opponent.x);
+                const dy = Math.abs((this.y - 40) - (opponent.y - 40));
+
+                // If close enough and facing them
+                let hit = false;
+                if (dx < reach && dy < 80) {
+                    // Check if facing correct way
+                    if (this.facing === 1 && opponent.x > this.x) hit = true;
+                    if (this.facing === -1 && opponent.x < this.x) hit = true;
+                }
+
+                // Create a "Swing" effect (invisible but logic triggers)
+                
+                if (hit) {
+                    opponent.takeDamage(10, this.facing);
+                    // Add a visual "POW" effect
+                    const effectX = (this.x + opponent.x) / 2;
+                    const effectY = (this.y + opponent.y) / 2 - 40;
+                    particles.push(new Particle(effectX, effectY, "💥 POW!"));
+                }
+            }
+
+            takeDamage(amount, direction) {
+                this.hp -= amount;
+                if (this.hp < 0) this.hp = 0;
+                this.lastHitTime = Date.now();
+                this.isHitFrame = 5; // Flash for 5 frames
+
+                // Knockback physics
+                this.vx = direction * KNOCKBACK_X;
+                this.vy = KNOCKBACK_Y;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // Draw Hit Flash (white outline if hit)
+                if (this.isHitFrame > 0) {
+                    ctx.shadowBlur = 20;
+                    ctx.shadowColor = "red";
+                }
+
+                // Draw Stick Body
+                ctx.strokeStyle = '#000'; // Black body on white arena
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                
+                // Legs
+                ctx.beginPath();
+                ctx.moveTo(0, 0); // Waist
+                ctx.lineTo(-15, 40); // Left Leg
+                ctx.moveTo(0, 0);
+                ctx.lineTo(15, 40); // Right Leg
+                ctx.stroke();
+
+                // Torso
+                ctx.beginPath();
+                ctx.moveTo(0, 0); // Waist
+                ctx.lineTo(0, -50); // Neck
+                ctx.stroke();
+
+                // Arms (animate slightly based on cooldown/punch)
+                let armOffset = (this.cooldown > 20) ? 30 : 0; // Extend arm if punching
+                
+                ctx.beginPath();
+                ctx.moveTo(0, -40); // Shoulder
+                ctx.lineTo(20 * this.facing + (armOffset*this.facing), -20); // Front Arm
+                ctx.moveTo(0, -40);
+                ctx.lineTo(-20 * this.facing, -20); // Back Arm
+                ctx.stroke();
+
+                // Draw Emoji Head
+                ctx.font = "40px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                
+                // Flip emoji if facing left? (Scale transformation)
+                ctx.save();
+                ctx.translate(0, -65);
+                if (this.facing === -1) {
+                    ctx.scale(-1, 1);
+                }
+                ctx.fillText(this.headEmoji, 0, 0);
+                ctx.restore();
+
+                ctx.restore();
+            }
+        }
+
+        // --- 3. PARTICLE CLASS (Visual Effects) ---
+        class Particle {
+            constructor(x, y, text) {
+                this.x = x;
+                this.y = y;
+                this.text = text;
+                this.life = 30; // Lasts 30 frames
+                this.vy = -1; // Floats up
+            }
+            update() {
+                this.y += this.vy;
+                this.life--;
+            }
+            draw() {
+                ctx.font = "bold 24px Arial";
+                ctx.fillStyle = `rgba(0, 0, 0, ${this.life / 30})`;
+                ctx.fillText(this.text, this.x, this.y);
+            }
+        }
+
+        // --- 4. INITIALIZE PLAYERS ---
+
+        // Controls Map
+        const p1Controls = {
+            left: 'a', right: 'd', up: 'w', down: 's', attack: 'f'
+        };
+        const p2Controls = {
+            left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown', attack: 'l'
+        };
+
+        const player1 = new Player(150, 'blue', p1Controls);
+        const player2 = new Player(650, 'red', p2Controls);
+
+        // --- 5. INPUT HANDLING ---
+
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+
+        // --- 6. UI & SELECTION LOGIC ---
+
+        function initSelectScreen() {
+            const p1Grid = document.getElementById('p1-grid');
+            const p2Grid = document.getElementById('p2-grid');
+            const startBtn = document.getElementById('start-btn');
+
+            // Helper to create grid items
+            function createGrid(container, playerVar, onSelect) {
+                emojis.forEach(emoji => {
+                    const div = document.createElement('div');
+                    div.className = 'emoji-option';
+                    div.innerText = emoji;
+                    div.onclick = () => {
+                        // Remove selected class from siblings
+                        Array.from(container.children).forEach(c => c.classList.remove('selected'));
+                        div.classList.add('selected');
+                        onSelect(emoji);
+                        checkReady();
+                    };
+                    container.appendChild(div);
+                });
+            }
+
+            createGrid(p1Grid, p1Head, (e) => p1Head = e);
+            createGrid(p2Grid, p2Head, (e) => p2Head = e);
+
+            function checkReady() {
+                if (p1Head && p2Head) {
+                    startBtn.disabled = false;
+                    startBtn.style.opacity = 1;
+                } else {
+                    startBtn.disabled = true;
+                    startBtn.style.opacity = 0.5;
+                }
+            }
+            
+            startBtn.onclick = () => {
+                player1.headEmoji = p1Head;
+                player2.headEmoji = p2Head;
+                document.getElementById('start-screen').classList.add('hidden');
+                gameState = 'PLAYING';
+                player1.reset();
+                player2.reset();
+                gameLoop();
+            };
+        }
+
+        // --- 7. GAME LOOP & RENDERING ---
+
+        function drawHealthBar(x, y, player, name) {
+            const width = 300;
+            const height = 25;
+
+            // Draw Label
+            ctx.fillStyle = "#000";
+            ctx.font = "bold 16px Arial";
+            ctx.textAlign = "left";
+            ctx.fillText(name, x, y - 8);
+
+            // Background (Grey)
+            ctx.fillStyle = "#555";
+            ctx.fillRect(x, y, width, height);
+
+            // Red Bar (Damage lagging behind)
+            const redWidth = (player.displayHp / 100) * width;
+            ctx.fillStyle = "#ff0000";
+            ctx.fillRect(x, y, redWidth, height);
+
+            // Green Bar (Current HP)
+            const greenWidth = (player.hp / 100) * width;
+            ctx.fillStyle = "#00cc00";
+            ctx.fillRect(x, y, greenWidth, height);
+
+            // Border
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, width, height);
+        }
+
+        function gameLoop() {
+            if (gameState !== 'PLAYING') return;
+
+            // 1. Clear Screen
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Update Physics & Logic
+            player1.update(player2);
+            player2.update(player1);
+
+            // Update Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                if (particles[i].life <= 0) particles.splice(i, 1);
+            }
+
+            // 3. Draw Players
+            player1.draw();
+            player2.draw();
+
+            // Draw Particles
+            particles.forEach(p => p.draw());
+
+            // 4. Draw HUD (Health Bars)
+            drawHealthBar(20, 40, player1, "Player 1");
+            drawHealthBar(480, 40, player2, "Player 2");
+
+            // 5. Check Win Condition
+            if (player1.hp <= 0 || player2.hp <= 0) {
+                endGame();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function endGame() {
+            gameState = 'GAMEOVER';
+            const winner = (player1.hp > 0) ? "Player 1" : "Player 2";
+            
+            document.getElementById('winner-text').innerText = `${winner} Wins!`;
+            document.getElementById('game-over-screen').classList.remove('hidden');
+        }
+
+        // Restart Logic
+        document.getElementById('restart-btn').onclick = () => {
+            player1.reset();
+            player2.reset();
+            particles = [];
+            gameState = 'PLAYING';
+            document.getElementById('game-over-screen').classList.add('hidden');
+            gameLoop();
+        };
+
+        // Start initialization
+        initSelectScreen();
+
+    </script>
+</body>
+</html>
