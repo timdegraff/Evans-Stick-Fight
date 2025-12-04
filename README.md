@@ -1,1 +1,0 @@
-# Evans-Stick-Fight
